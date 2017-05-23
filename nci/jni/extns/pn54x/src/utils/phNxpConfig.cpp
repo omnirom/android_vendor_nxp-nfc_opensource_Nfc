@@ -68,13 +68,15 @@ const char alternative_config_path[] = "";
 #endif
 
 #if 1
-const char transport_config_path[] = "/etc/";
+const char* transport_config_paths[] = {"/odm/etc/", "/vendor/etc/", "/etc/"};
 #if(NXP_EXTNS == TRUE)
 const char transit_config_path[] = "/data/nfc/";
 #endif
 #else
-const char transport_config_path[] = "res/";
+const char* transport_config_paths[] = {"res/"};
 #endif
+const int transport_config_path_size =
+        (sizeof(transport_config_paths) / sizeof(transport_config_paths[0]));
 
 /**
  *  @brief defines the different config files used.
@@ -136,6 +138,8 @@ typedef enum
 } TARGETTYPE;
 
 using namespace::std;
+
+void findConfigFilePathFromTransportConfigPaths(const string& configName, string& filePath);
 
 class CNxpNfcParam : public string
 {
@@ -323,8 +327,7 @@ int CNxpNfcConfig::getconfiguration_id(char *config_file)
     snprintf(config_file, MAX_DATA_CONFIG_PATH_LEN, "libnfc-%s_%s.conf",
         soc_info, target_type);
 
-    strPath.assign (transport_config_path);
-    strPath += config_file;
+    findConfigFilePathFromTransportConfigPaths(config_file, strPath);
     if (file_exist(strPath.c_str()))
         idx = 0;
 
@@ -463,6 +466,31 @@ inline int getDigitValue (char c, int base)
             return c - 'a' + 10;
     }
     return 0;
+}
+
+/*******************************************************************************
+**
+** Function:    findConfigFilePathFromTransportConfigPaths()
+**
+** Description: find a config file path with a given config name from transport
+**              config paths
+**
+** Returns:     none
+**
+*******************************************************************************/
+void findConfigFilePathFromTransportConfigPaths(const string& configName,
+                                                string& filePath) {
+    for (int i = 0; i < transport_config_path_size - 1; i++) {
+        filePath.assign(transport_config_paths[i]);
+        filePath += configName;
+        struct stat file_stat;
+        if (stat(filePath.c_str(), &file_stat) == 0 &&
+            S_ISREG(file_stat.st_mode)) {
+            return;
+        }
+    }
+    filePath.assign(transport_config_paths[transport_config_path_size - 1]);
+    filePath += configName;
 }
 
 /*******************************************************************************
@@ -800,8 +828,7 @@ CNxpNfcConfig& CNxpNfcConfig::GetInstance ()
                 return theInstance;
             }
         }
-        strPath.assign (transport_config_path);
-        strPath += config_name;
+        findConfigFilePathFromTransportConfigPaths(config_name, strPath);
         //checks whether the default config file is present in th target
         if (theInstance.file_exist(strPath.c_str()))
         {
@@ -814,14 +841,12 @@ CNxpNfcConfig& CNxpNfcConfig::GetInstance ()
              */
             return theInstance;
         }
-        strPath.assign(transport_config_path);
 
         gconfigpathid = theInstance.getconfiguration_id(config_name_generic);
-        strPath += config_name_generic;
+        findConfigFilePathFromTransportConfigPaths(config_name_generic, strPath);
         if (!(theInstance.file_exist(strPath.c_str()))) {
            ALOGI("no matching file found, using default file for stability\n");
-           strPath.assign(transport_config_path);
-           strPath += config_name_default;
+           findConfigFilePathFromTransportConfigPaths(config_name_default, strPath);
         }
         ALOGI("config file used = %s\n", strPath.c_str());
         theInstance.readConfig (strPath.c_str (), true);
@@ -1363,13 +1388,17 @@ extern "C" void resetNxpConfig ()
 void readOptionalConfig (const char* extra)
 {
     string strPath;
-    strPath.assign (transport_config_path);
-    if (alternative_config_path [0] != '\0')
-        strPath.assign (alternative_config_path);
+    string configName(extra_config_base);
+    configName += extra;
+    configName += extra_config_ext;
 
-    strPath += extra_config_base;
-    strPath += extra;
-    strPath += extra_config_ext;
+    if (alternative_config_path [0] != '\0') {
+        strPath.assign (alternative_config_path);
+        strPath += configName;
+    } else {
+        findConfigFilePathFromTransportConfigPaths(configName, strPath);
+    }
+
     CNxpNfcConfig::GetInstance ().readConfig (strPath.c_str (), false);
 }
 
