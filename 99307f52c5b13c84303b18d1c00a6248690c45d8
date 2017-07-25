@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "5567a05f_9478b2dc",
+        "filename": "nci/jni/Android.mk",
+        "patchSetId": 3
+      },
+      "lineNbr": 68,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2017-07-25T12:16:08Z",
+      "side": 1,
+      "message": "not to be picky - but I would just do it the same way as in the other file. Human brain likes to see similiar stuff to understand :)",
+      "revId": "99307f52c5b13c84303b18d1c00a6248690c45d8",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55",
+      "unresolved": false
+    }
+  ]
+}
