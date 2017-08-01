@@ -46,7 +46,7 @@ extern "C"
 
 int GetNxpStrValue (const char* name, char* p_value, unsigned long len);
 int GetNxpNumValue (const char* name, void* p_value, unsigned long len);
-int GetNxpByteArrayValue (const char* name, char* pValue, unsigned long bufflen, long *len);
+int GetNxpByteArrayValue (const char* name, char* pValue, long bufflen, long *len);
 void resetNxpConfig (void);
 int isNxpConfigModified ();
 int updateNxpConfigTimestamp ();
@@ -94,7 +94,7 @@ int updateNxpConfigTimestamp ();
 #define NAME_NXP_ESE_WIRED_PRT_MASK         "NXP_ESE_WIRED_PRT_MASK"
 #define NAME_NXP_ENABLE_ADD_AID             "NXP_ENABLE_ADD_AID"
 #define NAME_NXP_ADDITIONAL_CONFIG_OPTIONS   "NXP_ADDITIONAL_CONFIG_OPTIONS"
-#if(NXP_ESE_POWER_MODE==TRUE)
+#if(NXP_ESE_POWER_MODE==true)
 #define NAME_NXP_ESE_POWER_DH_CONTROL       "NXP_ESE_POWER_DH_CONTROL"
 #endif
 #define NAME_NXP_DWP_INTF_RESET_ENABLE      "NXP_DWP_INTF_RESET_ENABLE"
@@ -105,12 +105,23 @@ int updateNxpConfigTimestamp ();
 #define config_name_mtp         "libnfc-mtp_default.conf"
 #define config_name_mtp1        "libnfc-mtp_rf1.conf"
 #define config_name_mtp2        "libnfc-mtp_rf2.conf"
-#define config_name_mtp_NQ3XX	"libnfc-mtp-NQ3XX.conf"
+#define config_name_mtp_NQ3XX   "libnfc-mtp-NQ3XX.conf"
+#define config_name_mtp_NQ4XX   "libnfc-mtp-NQ4XX.conf"
 #define config_name_qrd         "libnfc-qrd_default.conf"
 #define config_name_qrd1        "libnfc-qrd_rf1.conf"
 #define config_name_qrd2        "libnfc-qrd_rf2.conf"
-#define config_name_qrd_NQ3XX	"libnfc-qrd-NQ3XX.conf"
+#define config_name_qrd_NQ3XX   "libnfc-qrd-NQ3XX.conf"
+#define config_name_qrd_NQ4XX   "libnfc-qrd-NQ4XX.conf"
 #define config_name_default     "libnfc-nxp_default.conf"
+
+/**
+ *  @brief defines the different major number used.
+ */
+#define FW_MAJOR_NUM_NQ2xx     "10"
+#define FW_MAJOR_NUM_NQ3xx     "11"
+#define FW_MAJOR_NUM_NQ4xx     "12"
+
+#define FW_MAJOR_NUM_LENGTH    2
 
 /**
  *  @brief defines the maximum length of the target name.
