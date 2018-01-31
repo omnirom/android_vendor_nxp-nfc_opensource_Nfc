@@ -96,10 +96,10 @@ int updateNxpConfigTimestamp ();
 #define NAME_NXP_ADDITIONAL_CONFIG_OPTIONS   "NXP_ADDITIONAL_CONFIG_OPTIONS"
 #define NAME_NXP_ESE_POWER_DH_CONTROL       "NXP_ESE_POWER_DH_CONTROL"
 #define NAME_NXP_DWP_INTF_RESET_ENABLE      "NXP_DWP_INTF_RESET_ENABLE"
+
 /**
  *  @brief defines the different config files used.
  */
-
 #define config_name_mtp         "libnfc-mtp_default.conf"
 #define config_name_mtp1        "libnfc-mtp_rf1.conf"
 #define config_name_mtp2        "libnfc-mtp_rf2.conf"
@@ -167,6 +167,7 @@ int updateNxpConfigTimestamp ();
 
 #define DEBUG 0
 
-
+/* default configuration */
+#define default_storage_location "/data/nfc"
 
 #endif //_NXP_CONFIG_H
