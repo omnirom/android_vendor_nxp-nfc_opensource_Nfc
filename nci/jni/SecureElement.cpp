@@ -3232,15 +3232,6 @@ bool SecureElement::SecEle_Modeset(uint8_t type)
             retval = true;
         }
 #endif
-        /*Mode set on wait for ntf*/
-        if(type)
-        {
-            SyncEventGuard guard (SecureElement::getInstance().mEeSetModeEvent);
-            if(SecureElement::getInstance().mEeSetModeEvent.wait(500) == false)
-            {
-                ALOGE("%s: timeout waiting for setModeNtf", __func__);
-            }
-        }
     }
     else
 #endif
@@ -4043,6 +4034,10 @@ TheEnd:
     return decoded_length;
 }
 #if(NXP_EXTNS == TRUE)
+void cleanupStack(void* p)
+{
+    return;
+}
 /*******************************************************************************
 **
 ** Function:       spiEventHandlerThread
@@ -4054,6 +4049,10 @@ TheEnd:
 *******************************************************************************/
 void *spiEventHandlerThread(void *arg)
 {
+    void (*pCleanupRoutine)(void* ptr) = cleanupStack;
+    __pthread_cleanup_t  __cleanup;
+    SecureElement &se = SecureElement::getInstance();
+
     if(!nfcFL.nfcNxpEse) {
         ALOGV("%s: nfcNxpEse not available. Returning", __func__);
         return NULL;
@@ -4065,7 +4064,7 @@ void *spiEventHandlerThread(void *arg)
     }
     (void)arg;
     uint16_t usEvent = 0, usEvtLen = 0;
-
+    tNFC_STATUS stat;
 
     NFCSTATUS ese_status = NFA_STATUS_FAILED;
 
@@ -4094,6 +4093,8 @@ void *spiEventHandlerThread(void *arg)
          {
              ALOGV("%s: SPI PRIO End Signal\n", __func__);
              hold_the_transceive = false;
+             if(!se.mIsWiredModeOpen)
+                spiDwpSyncState = STATE_DWP_CLOSE;
              setSPIState(false);
              SyncEventGuard guard (sSPIPrioSessionEndEvent);
              sSPIPrioSessionEndEvent.notifyOne ();
@@ -4107,6 +4108,8 @@ void *spiEventHandlerThread(void *arg)
         {
             ALOGV("%s: SPI End Signal\n", __func__);
             hold_the_transceive = false;
+            if(!se.mIsWiredModeOpen)
+                spiDwpSyncState = STATE_DWP_CLOSE;
             setSPIState(false);
         }
 
@@ -4118,6 +4121,10 @@ void *spiEventHandlerThread(void *arg)
                         (usEvent & P61_STATE_SPI))
                 {
                     nfaVSC_ForceDwpOnOff(true);
+                    if(nfcFL.eseFL._WIRED_MODE_STANDBY) {
+                    if(android::nfcManager_getNfcState() != NFC_OFF)
+                        NFC_RelForceDwpOnOffWait((void*)&stat);
+                    }
                 }
                 else if((usEvent & P61_STATE_SPI_PRIO_END) ||
                         (usEvent & P61_STATE_SPI_END))
@@ -4141,6 +4148,10 @@ void *spiEventHandlerThread(void *arg)
                         (usEvent & P61_STATE_SPI)))
         {
             nfaVSC_ForceDwpOnOff(true);
+            if(nfcFL.eseFL._WIRED_MODE_STANDBY) {
+            if(android::nfcManager_getNfcState() != NFC_OFF)
+                NFC_RelForceDwpOnOffWait((void*)&stat);
+            }
         }
         else if(nfcFL.eseFL._ESE_DWP_SPI_SYNC_ENABLE &&
                 ((usEvent & P61_STATE_SPI_PRIO_END) ||
@@ -4182,6 +4193,9 @@ void *spiEventHandlerThread(void *arg)
         }
     }
     ALOGV("%s: exit", __func__);
+    /*Explicit cleanup to avoid any issue due to pthread datastructure corruption*/
+    __pthread_cleanup_push(&__cleanup, pCleanupRoutine, NULL);
+    __pthread_cleanup_pop(&__cleanup, 0);
     pthread_exit(NULL);
     return NULL;
 }
@@ -4236,6 +4250,10 @@ void releaseSPIEvtHandlerThread()
     /* Notifying the signal handler thread to exit if it is waiting */
     SyncEventGuard guard(sSPISignalHandlerEvent);
     sSPISignalHandlerEvent.notifyOne ();
+    {
+        SyncEventGuard guard(SecureElement::getInstance().mModeSetNtf);
+        SecureElement::getInstance().mModeSetNtf.notifyOne();
+    }
 }
 /*******************************************************************************
 **
@@ -4394,6 +4412,7 @@ static void nfaVSC_ForceDwpOnOff(bool type)
             /*If DWP session is closed*/
             (void)SecureElement::getInstance().setNfccPwrConfig(SecureElement::getInstance().NFCC_DECIDES);
         }
+
         if(spiDwpSyncState & STATE_DWP_CLOSE)
         {
             stat = NFA_HciSendEvent (NFA_HANDLE_GROUP_HCI, 0x19, EVT_END_OF_APDU_TRANSFER,
@@ -4737,9 +4756,14 @@ tNFA_STATUS SecureElement::SecElem_EeModeSet(uint16_t handle, uint8_t mode)
             sSecElem.mResetEvent.wait();
         }
     }
+    if((dual_mode_current_state & SPI_ON) && (handle == EE_HANDLE_0xF3) &&
+        (mode == NFA_EE_MD_DEACTIVATE))
+        return NFA_STATUS_OK;
+
     SyncEventGuard guard (sSecElem.mEeSetModeEvent);
     stat =  NFA_EeModeSet(handle, mode);
-    if(stat == NFA_STATUS_OK && !android::nfcManager_isNfcDisabling())
+    if(stat == NFA_STATUS_OK && !android::nfcManager_isNfcDisabling() &&
+       (android::nfcManager_getNfcState() != NFC_OFF))
     {
         sSecElem.mEeSetModeEvent.wait ();
     }
