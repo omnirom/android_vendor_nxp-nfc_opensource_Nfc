@@ -2,7 +2,7 @@
  * Copyright (c) 2016, The Linux Foundation. All rights reserved.
  * Not a Contribution.
  *
- * Copyright (C) 2015 NXP Semiconductors
+ * Copyright (C) 2015-2018 NXP Semiconductors
  * The original Work has been changed by NXP Semiconductors.
  *
  * Copyright (C) 2012 The Android Open Source Project
@@ -337,10 +337,17 @@ if(nfcFL.nfcNxpEse && stat)
             }
         }
     }
-
+    if(status == NFA_STATUS_OK)
+    {
+        bool ret = false;
+        ret = se.checkPipeStatusAndRecreate();
+        if(!ret)
+            status = NFCSTATUS_FAILED;
+    }
     if(status != NFA_STATUS_OK)
     {
-        if(nfcFL.eseFL._WIRED_MODE_STANDBY && (se.mNfccPowerMode == 1)) {
+        if(nfcFL.eseFL._WIRED_MODE_STANDBY && (se.mNfccPowerMode == 1) &&
+        !(p61_current_state & (P61_STATE_SPI | P61_STATE_SPI_PRIO))) {
             se.setNfccPwrConfig(se.NFCC_DECIDES);
         }
         se.disconnectEE (secElemHandle);

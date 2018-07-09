@@ -17,7 +17,7 @@
  *
  *  The original Work has been changed by NXP Semiconductors.
  *
- *  Copyright (C) 2015 NXP Semiconductors
+ *  Copyright (C) 2015-2018 NXP Semiconductors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -225,7 +225,10 @@ public:
     SyncEvent   mCreatePipeEvent;
     SyncEvent   mPipeOpenedEvent;
     SyncEvent   mAbortEvent;
+    SyncEvent   mPipeStatusCheckEvent;
     bool        mAbortEventWaitOk;
+    uint8_t     pipeStatus;
+    bool IsCmdsentOnOpenDwpSession;
     bool enableDwp(void);
     IntervalTimer sSwpReaderTimer; /*timer swp reader timeout*/
     static const tNFA_HANDLE EE_HANDLE_0xF3 = 0x4C0;//0x401; //handle to secure element in slot 0
@@ -655,6 +658,7 @@ public:
 #if(NXP_EXTNS == TRUE)
     bool getNfceeHostTypeList (void);
     bool configureNfceeETSI12 ();
+    bool checkPipeStatusAndRecreate();
     void eSE_ClearAllPipe_handler(uint8_t host);
     /**********************************************************************************
      **
@@ -812,18 +816,15 @@ public:
     uint8_t      mNfccPowerMode;
     tNFA_STATUS  setNfccPwrConfig(uint8_t value);
     bool mIsIntfRstEnabled;
+    bool mIsEmvCoPollEnabled;
     void setCLState(bool mState);
     void setDwpTranseiveState(bool state, tNFCC_EVTS_NTF action);
 #endif
 
 private:
+    static uint8_t mStaticPipeProp;
     static const unsigned int MAX_RESPONSE_SIZE = 0x8800;//1024; //34K
     enum RouteSelection {NoRoute, DefaultRoute, SecElemRoute};
-#ifndef GEMATO_SE_SUPPORT
-    static const uint8_t STATIC_PIPE_0x70 = 0x19; //PN54X Gemalto's proprietary static pipe
-#else
-    static const uint8_t STATIC_PIPE_0x70 = 0x70; //Broadcom's proprietary static pipe
-#endif
     static const uint8_t STATIC_PIPE_0x71 = 0x71; //Broadcom's proprietary static pipe
     static const uint8_t EVT_SEND_DATA = 0x10;    //see specification ETSI TS 102 622 v9.0.0 (Host Controller Interface); section 9.3.3.3
 #if(NXP_EXTNS == TRUE)
@@ -881,7 +882,6 @@ private:
     uint8_t         mVerInfo [3];
     uint8_t         mAtrInfo[40];
     bool            mGetAtrRspwait;
-    uint8_t         mResponseData [MAX_RESPONSE_SIZE];
     RouteDataSet    mRouteDataSet; //routing data
     std::vector<std::string> mUsedAids; //AID's that are used in current routes
     uint8_t         mAidForEmptySelect[NCI_MAX_AID_LEN+1];

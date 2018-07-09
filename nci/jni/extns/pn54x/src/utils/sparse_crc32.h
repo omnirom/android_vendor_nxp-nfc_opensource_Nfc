@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2010 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,26 +14,19 @@
  * limitations under the License.
  */
 
-/*
- *  Asynchronous interval timer.
- */
+#ifndef _LIBSPARSE_SPARSE_CRC32_H_
+#define _LIBSPARSE_SPARSE_CRC32_H_
 
-#include <time.h>
+#include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-class IntervalTimer
-{
-public:
-    typedef void (*TIMER_FUNC) (union sigval);
+uint32_t sparse_crc32(uint32_t crc, const void* buf, size_t size);
 
-    IntervalTimer();
-    ~IntervalTimer();
-    bool set(int ms, TIMER_FUNC cb);
-    void kill();
-    bool create(TIMER_FUNC );
-    bool isRunning(void);    //This function returns true if a valid timer is running(curTime > 0)
+#ifdef __cplusplus
+}
+#endif
 
-private:
-    timer_t mTimerId;
-    TIMER_FUNC mCb;
-};
+#endif

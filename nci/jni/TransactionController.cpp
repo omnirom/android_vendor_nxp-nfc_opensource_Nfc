@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 NXP Semiconductors
+ * Copyright (C) 2015-2018 NXP Semiconductors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,24 @@ void transactionController::lastRequestResume(void)
     pthread_attr_destroy(&attr);
     pTransactionDetail->current_transcation_state = NFA_TRANS_DM_RF_TRANS_END;
 }
+/*******************************************************************************
+ **
+ ** Function:       transactionHandlePendingCb
+ **
+ ** Description:    This is a callback function registered against
+ **                 pendingTransHandleTimer timer. This timer handler
+ **                 triggers enable_thread for handling pending transactions
+ **
+ ** Returns:       None
+ **
+ *******************************************************************************/
 
+extern "C" void transactionController::transactionHandlePendingCb(union sigval)
+{
+    ALOGD("Inside %s", __FUNCTION__);
+
+    pInstance->lastRequestResume();
+}
 /*******************************************************************************
  **
  ** Function:       transactionAbortTimerCb
@@ -76,7 +93,8 @@ extern "C" void transactionController::transactionAbortTimerCb(union sigval)
 {
     ALOGD("Inside %s", __FUNCTION__);
 
-    pInstance->lastRequestResume();
+    pInstance->transactionTerminate(TRANSACTION_REQUESTOR(exec_pending_req));
+
 }
 
 /*******************************************************************************
@@ -97,7 +115,8 @@ transactionController::transactionController(void)
 
     pTransactionDetail = android::nfcManager_transactionDetail();
     abortTimer = new IntervalTimer();
-    requestor = NULL;
+    pendingTransHandleTimer = new IntervalTimer();
+    requestor = NO_REQUESTOR;
 }
 /*******************************************************************************
  **
@@ -108,13 +127,13 @@ transactionController::transactionController(void)
  ** Returns:        true/false
  **
  *******************************************************************************/
-bool transactionController::transactionLiveLockable(const char* transactionRequestor)
+bool transactionController::transactionLiveLockable(eTransactionId transactionRequestor)
 {
     ALOGD ("%s: Performing check for long duration transaction", __FUNCTION__);
-    return !(strcmp(transactionRequestor,"NFA_ACTIVATED_EVENT") ||
-             strcmp(transactionRequestor,"NFA_EE_ACTION_EVENT") ||
-             strcmp(transactionRequestor,"NFA_TRANS_CE_ACTIVATED_EVENT") ||
-             strcmp(transactionRequestor,"RF_FIELD_EVT"));
+    return ((transactionRequestor == NFA_ACTIVATED_EVENT) ||
+            (transactionRequestor == NFA_EE_ACTION_EVENT) ||
+            (transactionRequestor == NFA_TRANS_CE_ACTIVATED_EVENT) ||
+            (transactionRequestor == RF_FIELD_EVT));
 }
 /*******************************************************************************
  **
@@ -125,7 +144,7 @@ bool transactionController::transactionLiveLockable(const char* transactionReque
  ** Returns:        None
  **
  *******************************************************************************/
-bool transactionController::transactionAttempt(const char* transactionRequestor, unsigned int timeoutInSec)
+bool transactionController::transactionAttempt(eTransactionId transactionRequestor, unsigned int timeoutInSec)
 {
     struct timespec timeout = {.tv_sec = 0, .tv_nsec = 0};
     int semVal = 0;
@@ -137,12 +156,17 @@ bool transactionController::transactionAttempt(const char* transactionRequestor,
     timeout.tv_sec += timeoutInSec;
 
     sem_getvalue(&barrier, &semVal);
-    ALOGD ("%s: Transaction attempted : %s when barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
+    ALOGD ("%s: Transaction attempted : %d when barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
 
+    if(pendingTransHandleTimer->isRunning())
+    {
+        ALOGD ("%s: Transaction denied due to pending transaction: %d ", __FUNCTION__, transactionRequestor);
+        return false;
+    }
     //Block wait on barrier
     if(sem_timedwait(&barrier, &timeout) != 0)
     {
-        ALOGD ("%s: Transaction denied : %s ", __FUNCTION__, transactionRequestor);
+        ALOGD ("%s: Transaction denied : %d ", __FUNCTION__, transactionRequestor);
         return false;
     }
 
@@ -156,7 +180,7 @@ bool transactionController::transactionAttempt(const char* transactionRequestor,
         abortTimer->set(10000, transactionAbortTimerCb);
     }
     sem_getvalue(&barrier, &semVal);
-    ALOGD ("%s: Transaction granted : %s and barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
+    ALOGD ("%s: Transaction granted : %d and barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
     return true;
 
 }
@@ -170,12 +194,18 @@ bool transactionController::transactionAttempt(const char* transactionRequestor,
  **                  false: If transaction attempt fails
  **
  *******************************************************************************/
-bool transactionController::transactionAttempt(const char* transactionRequestor)
+bool transactionController::transactionAttempt(eTransactionId transactionRequestor)
 {
     int semVal = 0;
 
     sem_getvalue(&barrier, &semVal);
-    ALOGD ("%s: Transaction attempted : %s when barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
+    ALOGD ("%s: Transaction attempted : %d when barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
+
+    if(pendingTransHandleTimer->isRunning())
+    {
+        ALOGD ("%s: Transaction denied due to pending transaction: %d ", __FUNCTION__, transactionRequestor);
+        return false;
+    }
 
     if(sem_trywait(&barrier) == 0)
     {
@@ -185,14 +215,14 @@ bool transactionController::transactionAttempt(const char* transactionRequestor)
         {
             abortTimer->set(10000, transactionAbortTimerCb);
         }
-        ALOGD ("%s: Transaction granted : %s ", __FUNCTION__, transactionRequestor);
+        ALOGD ("%s: Transaction granted : %d ", __FUNCTION__, transactionRequestor);
 
         requestor = transactionRequestor;
         sem_getvalue(&barrier, &semVal);
-        ALOGD ("%s: Transaction granted : %s and barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
+        ALOGD ("%s: Transaction granted : %d and barrier is: %d", __FUNCTION__, transactionRequestor, semVal);
         return true;
     }
-    ALOGD ("%s: Transaction denied : %s ", __FUNCTION__, transactionRequestor);
+    ALOGD ("%s: Transaction denied : %d ", __FUNCTION__, transactionRequestor);
     return false;
 }
 /*******************************************************************************
@@ -204,29 +234,33 @@ bool transactionController::transactionAttempt(const char* transactionRequestor)
  ** Returns:        None
  **
  *******************************************************************************/
-void transactionController::transactionEnd(const char* transactionRequestor)
+void transactionController::transactionEnd(eTransactionId transactionRequestor)
 {
     int val;
 
     if(requestor == transactionRequestor)
     {
+        /*If any abort timer is running for this transaction then stop it*/
+        abortTimer->kill();
+        /*Create new abort timer for next use*/
+        abortTimer = new IntervalTimer();
+        ALOGD ("%s: Transaction control timer killed", __FUNCTION__);
+
         pTransactionDetail->trans_in_progress = false;
-
-        sem_getvalue(&barrier, &val);
-
-        if(!val)
-            sem_post(&barrier);
-
-        ALOGD ("%s: Transaction ended : %s ", __FUNCTION__, transactionRequestor);
+        requestor = NO_REQUESTOR;
+        ALOGD ("%s: Transaction ended : %d ", __FUNCTION__, transactionRequestor);
 
         /*
         ** TODO: The below code needs to improved and thread dependency shall be reduced
         **/
         if(android::nfcManager_isRequestPending())
         {
-            abortTimer->set(5, transactionAbortTimerCb);
+            pendingTransHandleTimer->set(1, transactionHandlePendingCb);
         }
 
+        sem_getvalue(&barrier, &val);
+        if(!val)
+            sem_post(&barrier);
     }
 }
 /*******************************************************************************
@@ -239,23 +273,28 @@ void transactionController::transactionEnd(const char* transactionRequestor)
  **                 false: If attempt to terminate fails
  **
  *******************************************************************************/
-bool  transactionController::transactionTerminate(const char* transactionRequestor)
+bool  transactionController::transactionTerminate(eTransactionId transactionRequestor)
 {
     int val;
 
-    ALOGD ("%s: Enter. Requested by : %s ", __FUNCTION__, transactionRequestor);
+    ALOGD ("%s: Enter. Requested by : %d ", __FUNCTION__, transactionRequestor);
 
-    if((requestor != NULL) &&
-       (requestor == transactionRequestor || !strcmp(transactionRequestor,"exec_pending_req")))
+    if((requestor != 0) &&
+       (requestor == transactionRequestor || transactionRequestor == exec_pending_req))
     {
         pTransactionDetail->trans_in_progress = false;
-        abortTimer->kill();
+        requestor = NO_REQUESTOR;
+        killAbortTimer();
+
+        if(android::nfcManager_isRequestPending())
+        {
+            pendingTransHandleTimer->set(1, transactionHandlePendingCb);
+        }
 
         sem_getvalue(&barrier, &val);
         if(!val)
             sem_post(&barrier);
-
-        ALOGD ("%s: Transaction terminated : %s ", __FUNCTION__, transactionRequestor);
+        ALOGD ("%s: Transaction terminated : %d ", __FUNCTION__, transactionRequestor);
         return true;
     }
     return false;
@@ -305,9 +344,13 @@ transactionController* transactionController::controller(void)
     else
     {
         pInstance->pTransactionDetail->trans_in_progress = false;
-        pInstance->requestor = NULL;
+        pInstance->requestor = NO_REQUESTOR;
 
         pInstance->abortTimer->kill();
+        pInstance->pendingTransHandleTimer->kill();
+
+        pInstance->abortTimer = new IntervalTimer();
+        pInstance->pendingTransHandleTimer = new IntervalTimer();
 
         sem_destroy(&pInstance->barrier);
 
@@ -316,6 +359,7 @@ transactionController* transactionController::controller(void)
         ALOGD ("%s: transaction controller initialized", __FUNCTION__);
 
     }
+    memset(pInstance->pTransactionDetail, 0x00, sizeof(*(pInstance->pTransactionDetail)));
     return pInstance;
 }
 /*******************************************************************************
@@ -332,7 +376,10 @@ void transactionController::killAbortTimer(void)
     ALOGD ("%s: transaction controller abort timer killed", __FUNCTION__);
 
     if(transactionInProgress())
+    {
         abortTimer->kill();
+        abortTimer = new IntervalTimer();
+    }
 }
 /*******************************************************************************
  **
@@ -349,4 +396,18 @@ void transactionController::setAbortTimer(unsigned int msec)
 
     if(transactionInProgress())
         abortTimer->set(msec, transactionAbortTimerCb);
+}
+
+/*******************************************************************************
+ **
+ ** Function:       getCurTransactionRequestor
+ **
+ ** Description:   This function returns current active requestor
+ **
+ ** Returns:       active requestor
+ **
+ *******************************************************************************/
+eTransactionId transactionController::getCurTransactionRequestor()
+{
+    return requestor;
 }
