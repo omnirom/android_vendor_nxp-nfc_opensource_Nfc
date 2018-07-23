@@ -2,7 +2,7 @@
  * Copyright (c) 2016, The Linux Foundation. All rights reserved.
  * Not a Contribution.
  *
- * Copyright (C) 2015 NXP Semiconductors
+ * Copyright (C) 2015-2018 NXP Semiconductors
  * The original Work has been changed by NXP Semiconductors.
  *
  * Copyright (C) 2013 The Android Open Source Project
@@ -787,9 +787,16 @@ void RoutingManager::setCeRouteStrictDisable(uint32_t state)
  ********************************************************************************/
 void RoutingManager::nfaEEConnect()
 {
-    if(NFA_STATUS_OK == NFA_EeConnect(EE_HCI_DEFAULT_HANDLE,
-                NFC_NFCEE_INTERFACE_HCI_ACCESS,
-                nfaEeCallback))
+    tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
+    if(NFA_GetNCIVersion() != NCI_VERSION_2_0)
+    {
+      nfaStat = NFA_EeConnect(EE_HCI_DEFAULT_HANDLE, NFC_NFCEE_INTERFACE_HCI_ACCESS, nfaEeCallback);
+    }
+    else
+    {
+      nfaStat = NFA_EeDiscover(nfaEeCallback);
+    }
+    if(nfaStat == NFA_STATUS_OK)
     {
         SyncEventGuard g(gNfceeDiscCbEvent);
         ALOGV("%s, Sem wait for gNfceeDiscCbEvent %d", __FUNCTION__, gdisc_timeout);
@@ -1862,7 +1869,7 @@ bool RoutingManager::clearRoutingEntry(int type)
 #if(NXP_EXTNS == TRUE)
 bool RoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen, int route, int power, int aidInfo)
 #else
-bool RoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen, int route)
+bool RoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen, int route, int aidInfo)
 #endif
 {
     static const char fn [] = "RoutingManager::addAidRouting";
@@ -1901,7 +1908,7 @@ bool RoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen, int route
 
     tNFA_STATUS nfaStat = NFA_EeAddAidRouting(handle, aidLen, (uint8_t*) aid, power, aidInfo);
 #else
-    tNFA_STATUS nfaStat = NFA_EeAddAidRouting(route, aidLen, (uint8_t*) aid, 0x01);
+    tNFA_STATUS nfaStat = NFA_EeAddAidRouting(route, aidLen, (uint8_t*) aid, 0x01, aidInfo);
 #endif
     if (nfaStat == NFA_STATUS_OK)
     {
@@ -2437,7 +2444,7 @@ void RoutingManager::nfaEeCallback (tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* event
             se.mPwrLinkCtrlEvent.notifyOne();
         }
         break;
-
+#endif
     case NFA_EE_SET_TECH_CFG_EVT:
         {
             ALOGV("%s: NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn, eventData->status);
@@ -3058,13 +3065,17 @@ void *ee_removed_ntf_handler_thread(void *data)
             ALOGV("%s: power link command failed", __func__);
         }
     }
-#endif
-    stat = NFA_EeModeSet(SecureElement::EE_HANDLE_0xF3, NFA_EE_MD_DEACTIVATE);
-
-    if(stat == NFA_STATUS_OK)
     {
         SyncEventGuard guard (se.mEeSetModeEvent);
-        se.mEeSetModeEvent.wait ();
+        stat = NFA_EeModeSet(SecureElement::EE_HANDLE_0xF3, NFA_EE_MD_DEACTIVATE);
+
+        if(stat == NFA_STATUS_OK)
+        {
+            if(se.mEeSetModeEvent.wait (500) == false)
+            {
+                ALOGV("%s:SetMode rsp timeout", __func__);
+            }
+        }
     }
     if(nfcFL.nfcNxpEse) {
         se.NfccStandByOperation(STANDBY_GPIO_LOW);
@@ -3079,14 +3090,29 @@ void *ee_removed_ntf_handler_thread(void *data)
             }
         }
     }
-    stat = NFA_EeModeSet(SecureElement::EE_HANDLE_0xF3, NFA_EE_MD_ACTIVATE);
-
-    if(stat == NFA_STATUS_OK)
-    {
-        SyncEventGuard guard (se.mEeSetModeEvent);
-        if(se.mEeSetModeEvent.wait (500) == false)
-        {
-            ALOGV("%s:SetMode ntf timeout", __func__);
+    if(nfcFL.eseFL._WIRED_MODE_STANDBY) {
+        SyncEventGuard guard(se.mModeSetNtf);
+        stat = NFA_EeModeSet(SecureElement::EE_HANDLE_0xF3, NFA_EE_MD_ACTIVATE);
+        if(stat == NFA_STATUS_OK) {
+            if(se.mModeSetNtf.wait (500) == false) {
+                ALOGV("%s:SetMode ntf timeout", __func__);
+            } else {
+                // do nothing
+            }
+        } else {
+            // do nothing
+        }
+    } else {
+        SyncEventGuard guard(se.mEeSetModeEvent);
+        stat = NFA_EeModeSet(SecureElement::EE_HANDLE_0xF3, NFA_EE_MD_ACTIVATE);
+        if(stat == NFA_STATUS_OK) {
+            if(se.mEeSetModeEvent.wait (500) == false) {
+                ALOGV("%s:SetMode rsp timeout", __func__);
+            } else {
+                // do nothing
+            }
+        } else {
+            // do nothing
         }
     }
     rm.mResetHandlerMutex.unlock();
@@ -3211,6 +3237,17 @@ bool RoutingManager::is_ee_recovery_ongoing()
     }
     ALOGV("%s := %s", fn, ((recovery==true) ? "true" : "false" ));
     return recovery;
+}
+
+void RoutingManager::setEERecovery(bool value)
+{
+    static const char fn [] = "RoutingManager::setEERecovery";
+    if(!nfcFL.nfccFL._NFCEE_REMOVED_NTF_RECOVERY) {
+        ALOGV("%s : NFCEE_REMOVED_NTF_RECOVERY not avaialble.Returning",__func__);
+        return;
+    }
+    ALOGV("%s: value %x", __func__,value);
+    recovery = value;
 }
 
 /*******************************************************************************

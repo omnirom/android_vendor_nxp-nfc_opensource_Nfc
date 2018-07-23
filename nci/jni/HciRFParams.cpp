@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 NXP Semiconductors
+ * Copyright (C) 2015-2018 NXP Semiconductors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,16 @@
 
 
 #include "HciRFParams.h"
+#include "SecureElement.h"
 
 #define VAL_START_IDX 4
 #define MAX_AID_SIZE 10
 #define MAX_APP_DATA_SIZE 15
 #define MAX_HIGHER_LAYER_RSP_SIZE 15
+
+#if(NXP_EXTNS == true)
+bool IsEseCeDisabled;
+#endif
 
 HciRFParams HciRFParams::sHciRFParams;
 
@@ -117,6 +122,15 @@ bool HciRFParams::initialize ()
     ALOGV("%s: status %x", __func__,get_config->status);
     ALOGV("%s: tlv_size %d", __func__,get_config->tlv_size);
     ALOGV("%s: param_tlvs %x", __func__,get_config->param_tlvs[0]);
+
+#if(NXP_EXTNS == true)
+    if((get_config->param_tlvs[1] == 0xA0 && get_config->param_tlvs[2] == 0xF0) &&
+        (get_config->param_tlvs[5] == 0xFF || get_config->param_tlvs[43] == 0xFF) &&
+         SecureElement::getInstance().getEeStatus(ESE_HANDLE) == NFA_EE_STATUS_ACTIVE) {
+        ALOGV("%s: CE with ESE is disabled", __func__);
+        IsEseCeDisabled = true;
+    }
+#endif
 
     uint8_t *params = get_config->param_tlvs;
     params+=VAL_START_IDX;
@@ -251,3 +265,39 @@ bool HciRFParams::isTypeBSupported()
     }
     return status;
 }
+
+#if(NXP_EXTNS == TRUE)
+bool HciRFParams::isCeWithEseDisabled ()
+{
+    static const char fn [] = "HciRFParams::isCeWithEseDisabled";
+    ALOGV("%s: enter", fn);
+    bool status = false;
+
+    tNFA_PMID param_ids[] = {0xA0, 0xF0};
+    {
+        SyncEventGuard guard (android::sNfaGetConfigEvent);
+        tNFA_STATUS stat = NFA_GetConfig(0x01,param_ids);
+        if(stat == NFA_STATUS_OK)
+        {
+            android::sNfaGetConfigEvent.wait(500);
+        }
+        else
+        {
+            ALOGE("%s: Get config is failed", __func__);
+            return status;
+        }
+    }
+    ALOGV("%s: status %x", __func__,get_config->status);
+    ALOGV("%s: tlv_size %d", __func__,get_config->tlv_size);
+    ALOGV("%s: param_tlvs %x", __func__,get_config->param_tlvs[0]);
+
+    if((get_config->param_tlvs[1] == 0xA0 && get_config->param_tlvs[2] == 0xF0) &&
+        (get_config->param_tlvs[5] == 0xFF || get_config->param_tlvs[43] == 0xFF) &&
+         SecureElement::getInstance().getEeStatus(ESE_HANDLE) == NFA_EE_STATUS_ACTIVE) {
+        ALOGV("%s: CE with ESE is disabled", __func__);
+        status = true;
+    }
+    ALOGV("%s: Exit status =%d", __func__, status);
+    return status;
+}
+#endif
